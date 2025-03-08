@@ -1,0 +1,10 @@
+<!-- res/drawable/ic_trophy.xml -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FFD700"
+        android:pathData="M12,2L3,9v6l9,7 9-7V9l-9-7zM12,4.5l6,4.5v3l-6,4.5-6-4.5v-3L12,4.5z" />
+</vector>
