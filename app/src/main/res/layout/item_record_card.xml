@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <androidx.cardview.widget.CardView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/card_view"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:layout_marginHorizontal="8dp"
@@ -14,6 +15,7 @@
         android:layout_height="wrap_content"
         android:padding="16dp">
 
+        <!-- 比赛时间 -->
         <TextView
             android:id="@+id/tv_date"
             android:layout_width="wrap_content"
@@ -25,15 +27,17 @@
             app:layout_constraintStart_toStartOf="parent"
             app:layout_constraintTop_toTopOf="parent" />
 
+        <!-- 比赛分数：放大并紧跟时间 -->
+
 
         <TextView
             android:id="@+id/tv_score"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginStart="88dp"
+            android:layout_marginStart="80dp"
             android:text="10 只"
             android:textColor="#666666"
-            android:textSize="20sp"
+            android:textSize="18sp"
             android:textStyle="bold"
             app:layout_constraintBaseline_toBaselineOf="@id/tv_date"
             app:layout_constraintStart_toEndOf="@id/tv_date" />

@@ -7,8 +7,11 @@ import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
+import android.widget.ImageView;
 import android.widget.TextView;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.cardview.widget.CardView;
+import androidx.recyclerview.widget.DiffUtil;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 import com.muen.hitmouse.databinding.ActivityRecordBinding;
@@ -47,6 +50,7 @@ public class RecordActivity extends AppCompatActivity {
         allRecords = loadRecordData(); // 加载所有记录
         setupRecyclerView();
         setupPagination();
+        setupBackButton(); // 设置返回按钮
     }
 
     private void setupRecyclerView() {
@@ -56,6 +60,7 @@ public class RecordActivity extends AppCompatActivity {
                 return;
             }
             binding.recyclerView.setLayoutManager(new LinearLayoutManager(this));
+            binding.recyclerView.setRecycledViewPool(new RecyclerView.RecycledViewPool()); // 启用回收池
             updateCurrentPageRecords(); // 初始化当前页数据
             recordAdapter = new RecordAdapter(currentPageRecords);
             binding.recyclerView.setAdapter(recordAdapter);
@@ -66,47 +71,48 @@ public class RecordActivity extends AppCompatActivity {
     }
 
     private void setupPagination() {
-        // 计算总页数
         totalPages = (int) Math.ceil((double) allRecords.size() / pageSize);
         Log.d(TAG, "总记录数: " + allRecords.size() + ", 总页数: " + totalPages);
 
-        // 初始按钮状态
         updateButtonState();
 
-        // 上一页按钮点击事件
         binding.btnPrevious.setOnClickListener(v -> {
             if (currentPage > 0) {
                 currentPage--;
                 updateCurrentPageRecords();
                 recordAdapter.updateData(currentPageRecords);
                 updateButtonState();
-                binding.recyclerView.scrollToPosition(0); // 滚动到顶部
+                binding.recyclerView.scrollToPosition(0);
                 Log.d(TAG, "切换到第 " + (currentPage + 1) + " 页");
             }
         });
 
-        // 下一页按钮点击事件
         binding.btnNext.setOnClickListener(v -> {
             if (currentPage < totalPages - 1) {
                 currentPage++;
                 updateCurrentPageRecords();
                 recordAdapter.updateData(currentPageRecords);
                 updateButtonState();
-                binding.recyclerView.scrollToPosition(0); // 滚动到顶部
+                binding.recyclerView.scrollToPosition(0);
                 Log.d(TAG, "切换到第 " + (currentPage + 1) + " 页");
             }
         });
     }
 
+    private void setupBackButton() {
+        binding.btnBack.setOnClickListener(v -> {
+            Log.d(TAG, "点击返回按钮");
+            finish();
+        });
+    }
+
     private void updateCurrentPageRecords() {
-        // 计算当前页的记录范围
         int start = currentPage * pageSize;
         int end = Math.min(start + pageSize, allRecords.size());
         currentPageRecords = new ArrayList<>(allRecords.subList(start, end));
     }
 
     private void updateButtonState() {
-        // 控制按钮启用/禁用状态并更新页码
         binding.btnPrevious.setEnabled(currentPage > 0);
         binding.btnNext.setEnabled(currentPage < totalPages - 1);
         binding.tvPageInfo.setText("第 " + (currentPage + 1) + "/" + totalPages + " 页");
@@ -179,6 +185,43 @@ class RecordAdapter extends RecyclerView.Adapter<RecordAdapter.RecordViewHolder>
         RecordEntry record = records.get(position);
         holder.tvDate.setText(record.getDate());
         holder.tvScore.setText(String.valueOf(record.getScore()) + " 只");
+
+        int score = record.getScore();
+        if (score >= 20) {
+            holder.cardView.setCardBackgroundColor(0xFFFFD700);
+            holder.tvDate.setTextColor(0xFF333333);
+            holder.tvScore.setTextColor(0xFF333333);
+            holder.ivIcon.getLayoutParams().height = 32;
+            holder.ivIcon.getLayoutParams().width = 32;
+            holder.ivIcon.requestLayout();
+        } else if (score >= 10) {
+            holder.cardView.setCardBackgroundColor(0xFFFF00);
+            holder.tvDate.setTextColor(0xFF333333);
+            holder.tvScore.setTextColor(0xFF333333);
+            holder.ivIcon.getLayoutParams().height = 24;
+            holder.ivIcon.getLayoutParams().width = 24;
+            holder.ivIcon.requestLayout();
+        } else {
+            holder.cardView.setCardBackgroundColor(0xFFFFFFFF);
+            holder.tvDate.setTextColor(0xFF333333);
+            holder.tvScore.setTextColor(0xFF666666);
+            holder.ivIcon.getLayoutParams().height = 24;
+            holder.ivIcon.getLayoutParams().width = 24;
+            holder.ivIcon.requestLayout();
+        }
+
+        holder.cardView.setOnClickListener(v -> {
+            v.animate()
+                    .scaleX(0.95f)
+                    .scaleY(0.95f)
+                    .setDuration(100)
+                    .withEndAction(() -> v.animate()
+                            .scaleX(1f)
+                            .scaleY(1f)
+                            .setDuration(100)
+                            .start())
+                    .start();
+        });
     }
 
     @Override
@@ -186,18 +229,58 @@ class RecordAdapter extends RecyclerView.Adapter<RecordAdapter.RecordViewHolder>
         return records.size();
     }
 
+    @Override
+    public void onAttachedToRecyclerView(RecyclerView recyclerView) {
+        recyclerView.setRecycledViewPool(new RecyclerView.RecycledViewPool());
+    }
+
     public void updateData(List<RecordEntry> newRecords) {
+        DiffUtil.DiffResult diffResult = DiffUtil.calculateDiff(new DiffCallback(this.records, newRecords));
         this.records = newRecords;
-        notifyDataSetChanged();
+        diffResult.dispatchUpdatesTo(this);
+    }
+
+    private static class DiffCallback extends DiffUtil.Callback {
+        private final List<RecordEntry> oldList;
+        private final List<RecordEntry> newList;
+
+        public DiffCallback(List<RecordEntry> oldList, List<RecordEntry> newList) {
+            this.oldList = oldList;
+            this.newList = newList;
+        }
+
+        @Override
+        public int getOldListSize() {
+            return oldList.size();
+        }
+
+        @Override
+        public int getNewListSize() {
+            return newList.size();
+        }
+
+        @Override
+        public boolean areItemsTheSame(int oldItemPosition, int newItemPosition) {
+            return oldList.get(oldItemPosition).getTimestamp() == newList.get(newItemPosition).getTimestamp();
+        }
+
+        @Override
+        public boolean areContentsTheSame(int oldItemPosition, int newItemPosition) {
+            return oldList.get(oldItemPosition).equals(newList.get(newItemPosition));
+        }
     }
 
     static class RecordViewHolder extends RecyclerView.ViewHolder {
+        CardView cardView;
         TextView tvDate, tvScore;
+        ImageView ivIcon;
 
         public RecordViewHolder(View itemView) {
             super(itemView);
+            cardView = itemView.findViewById(R.id.card_view);
             tvDate = itemView.findViewById(R.id.tv_date);
             tvScore = itemView.findViewById(R.id.tv_score);
+            ivIcon = itemView.findViewById(R.id.iv_icon);
         }
     }
 }

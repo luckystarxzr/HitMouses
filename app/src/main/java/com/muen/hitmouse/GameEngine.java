@@ -56,13 +56,16 @@ public class GameEngine {
         handler.post(mouseRunnable);
         handler.post(timeRunnable);
     }
+    private int comboCount = 0;
 
     public synchronized void hitMouse() {
         if (!isRunning) return;
 
         if (isRandomMode) {
             if (isHunterOnMouse(hunter, mouse)) {
-                count++;
+                comboCount++;
+                int score = (comboCount >= 3) ? 2 : 1;
+                count += score;
                 mouse.setVisibility(View.INVISIBLE);
                 boom.setX(mouse.getX() - 25f);
                 boom.setY(mouse.getY() - 25f);
@@ -75,7 +78,9 @@ public class GameEngine {
             if (currentHoleIndex != -1 && holes.length > 0) {
                 View currentHole = holes[currentHoleIndex];
                 if (isHunterInHole(hunter, currentHole)) {
-                    count++;
+                    comboCount++;
+                    int score = (comboCount >= 3) ? 2 : 1;
+                    count += score;
                     mouse.setVisibility(View.INVISIBLE);
                     boom.setX(mouse.getX() - 25f);
                     boom.setY(mouse.getY() - 25f);
@@ -88,6 +93,10 @@ public class GameEngine {
         }
     }
 
+    public int getLastScore() {
+        return (comboCount >= 3) ? 2 : 1;
+    }
+
     private void showScoreAnimation(ImageView target) {
         TextView scoreAnim = new TextView(context);
         scoreAnim.setText("+1");
@@ -96,7 +105,7 @@ public class GameEngine {
         LayoutParams params = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT);
         params.startToStart = LayoutParams.PARENT_ID;
         params.topToTop = LayoutParams.PARENT_ID;
-        params.setMargins((int) target.getX(), (int) target.getY(), 0, 0);
+        params.setMargins((int) target.getX() + target.getWidth() / 2, (int) target.getY() - 50, 0, 0);
         ((ConstraintLayout) target.getParent()).addView(scoreAnim, params);
 
         scoreAnim.animate()

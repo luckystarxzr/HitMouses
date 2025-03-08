@@ -1,25 +1,33 @@
 package com.muen.hitmouse;
 
+import android.content.Context;
 import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
-import android.media.MediaPlayer;
 import android.media.SoundPool;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
+import android.view.LayoutInflater;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.widget.Button;
 import android.widget.ImageView;
+import android.widget.TextView;
 import android.widget.Toast;
 import android.view.WindowManager;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.cardview.widget.CardView;
+import androidx.constraintlayout.widget.ConstraintLayout;
+import com.google.android.exoplayer2.ExoPlayer;
+import com.google.android.exoplayer2.MediaItem;
 import com.muen.hitmouse.databinding.LayoutPlayEasyBinding;
 import com.muen.hitmouse.databinding.LayoutPlayHardBinding;
 
@@ -27,16 +35,18 @@ public class PlayActivity extends AppCompatActivity {
     private static final int MSG_UPDATE_UI = 0x101;
     private static final int MSG_GAME_OVER = 0x102;
     private static final String TAG = "PlayActivity";
+    private static final long VIBRATION_DURATION = 50; // 震动持续时间（毫秒）
 
     private Object binding;
     private SharedPreferences sharedPreferences;
-    private MediaPlayer mediaPlayerStart;
+    private ExoPlayer exoplayer; // 替换 MediaPlayer
     private SoundPool soundPool;
     private int kickSoundId;
     private GameEngine gameEngine;
     private boolean isPaused = false;
     private boolean isRandomMode;
     private boolean isMuted = false;
+    private Vibrator vibrator; // 震动服务
 
     private final Handler handler = new Handler(Looper.getMainLooper()) {
         @Override
@@ -45,8 +55,8 @@ public class PlayActivity extends AppCompatActivity {
                 case MSG_UPDATE_UI:
                     if (!isPaused) {
                         gameEngine.updateUI(msg.arg1);
-                        if (!isMuted && mediaPlayerStart != null && !mediaPlayerStart.isPlaying()) {
-                            mediaPlayerStart.start();
+                        if (!isMuted && exoplayer != null && exoplayer.isPlaying()) {
+                            exoplayer.play();
                         }
                     }
                     break;
@@ -75,7 +85,7 @@ public class PlayActivity extends AppCompatActivity {
             setContentView(((LayoutPlayHardBinding) binding).getRoot());
         }
 
-        initMediaPlayers();
+        initAudioPlayers();
         setupTouchListenersWithObserver();
         setupButtons();
 
@@ -103,22 +113,30 @@ public class PlayActivity extends AppCompatActivity {
                 isRandomMode
         );
 
-        // 显示模式提示
+        vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE); // 初始化震动服务
+
         Toast.makeText(this, isRandomMode ? "困难模式开始！" : "简单模式开始！", Toast.LENGTH_SHORT).show();
         gameEngine.startGame();
     }
 
-    private void initMediaPlayers() {
+    private void initAudioPlayers() {
         soundPool = new SoundPool.Builder().setMaxStreams(2).build();
         kickSoundId = soundPool.load(this, R.raw.kick, 1);
-        mediaPlayerStart = MediaPlayer.create(this, R.raw.start);
+
+        // 初始化 ExoPlayer
+        exoplayer = new ExoPlayer.Builder(this).build();
+        MediaItem mediaItem = MediaItem.fromUri("android.resource://" + getPackageName() + "/" + R.raw.start);
+        exoplayer.setMediaItem(mediaItem);
+        exoplayer.prepare();
+
         if (isMuted) {
-            if (mediaPlayerStart != null && mediaPlayerStart.isPlaying()) {
-                mediaPlayerStart.pause();
+            if (exoplayer.isPlaying()) {
+                exoplayer.pause();
             }
-            stopMusicService(); // 静音时停止背景音乐
+            stopMusicService();
         } else {
-            startMusicService(); // 非静音时启动背景音乐
+            exoplayer.play();
+            startMusicService();
         }
     }
 
@@ -161,9 +179,9 @@ public class PlayActivity extends AppCompatActivity {
                     if (!isMuted) {
                         playKickSound();
                     }
-                    if (isHunterOnTarget(hunter, mouse)) {
-                        gameEngine.hitMouse();
-                    }
+                    gameEngine.hitMouse();
+                    showScoreAnimation(mouse); // 使用现有的 showScoreAnimation
+                    vibrate(); // 震动反馈
                 }
                 break;
         }
@@ -173,19 +191,6 @@ public class PlayActivity extends AppCompatActivity {
         if (soundPool != null) {
             soundPool.play(kickSoundId, 1.0f, 1.0f, 1, 0, 1.0f);
         }
-    }
-
-    private boolean isHunterOnTarget(ImageView hunter, ImageView target) {
-        if (target.getVisibility() != View.VISIBLE) return false;
-
-        float targetCenterX = target.getX() + target.getWidth() / 2f;
-        float targetCenterY = target.getY() + target.getHeight() / 2f;
-        float hunterX = hunter.getX() + hunter.getWidth() / 2f;
-        float hunterY = hunter.getY() + hunter.getHeight() / 2f;
-
-        float tolerance = 60f;
-        return Math.abs(hunterX - targetCenterX) < tolerance &&
-                Math.abs(hunterY - targetCenterY) < tolerance;
     }
 
     private void setupButtons() {
@@ -199,24 +204,9 @@ public class PlayActivity extends AppCompatActivity {
     }
 
     private void setupButtonListeners(Button pauseButton, Button backButton, Button muteButton) {
-        pauseButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                togglePause();
-            }
-        });
-        backButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                onBackPressed();
-            }
-        });
-        muteButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                toggleMusic();
-            }
-        });
+        pauseButton.setOnClickListener(v -> togglePause());
+        backButton.setOnClickListener(v -> onBackPressed());
+        muteButton.setOnClickListener(v -> toggleMusic());
         muteButton.setText(isMuted ? "开启音乐" : "关闭音乐");
     }
 
@@ -247,15 +237,15 @@ public class PlayActivity extends AppCompatActivity {
         editor.apply();
 
         if (isMuted) {
-            if (mediaPlayerStart != null && mediaPlayerStart.isPlaying()) {
-                mediaPlayerStart.pause();
+            if (exoplayer != null && exoplayer.isPlaying()) {
+                exoplayer.pause();
             }
-            stopMusicService(); // 停止背景音乐
+            stopMusicService();
         } else {
-            if (mediaPlayerStart != null && !mediaPlayerStart.isPlaying()) {
-                mediaPlayerStart.start();
+            if (exoplayer != null && !exoplayer.isPlaying()) {
+                exoplayer.play();
             }
-            startMusicService(); // 启动背景音乐
+            startMusicService();
         }
 
         getMuteButton().setText(isMuted ? "开启音乐" : "关闭音乐");
@@ -274,31 +264,53 @@ public class PlayActivity extends AppCompatActivity {
         int count = gameEngine.getCount();
         long timestamp = System.currentTimeMillis();
 
-        // 记录比赛分数和时间戳
         saveRecord(timestamp, count);
 
-        new AlertDialog.Builder(this)
-                .setTitle("游戏结束")
-                .setMessage("您一共打了 " + count + " 只地鼠")
-                .setNegativeButton("再来一局", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        recreate();
-                    }
-                })
-                .setNeutralButton("返回", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        finish();
-                    }
-                })
-                .setCancelable(false)
-                .show();
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_game_over, null);
+        builder.setView(dialogView);
+
+        CardView cardView = (CardView) dialogView;
+        TextView tvTitle = dialogView.findViewById(R.id.tv_title);
+        TextView tvMessage = dialogView.findViewById(R.id.tv_message);
+        Button btnRestart = dialogView.findViewById(R.id.btn_restart);
+        Button btnBack = dialogView.findViewById(R.id.btn_back);
+
+        tvTitle.setText("游戏结束");
+        tvMessage.setText("您一共打了 " + count + " 只地鼠");
+
+        if (count >= 20) {
+            cardView.setCardBackgroundColor(0xFFFFD700);
+            tvTitle.setTextColor(0xFF333333);
+            tvMessage.setTextColor(0xFF666666);
+        } else if (count >= 10) {
+            cardView.setCardBackgroundColor(0xFFFF00);
+            tvTitle.setTextColor(0xFF333333);
+            tvMessage.setTextColor(0xFF666666);
+        } else {
+            cardView.setCardBackgroundColor(0xFFFFFFFF);
+            tvTitle.setTextColor(0xFF333333);
+            tvMessage.setTextColor(0xFF666666);
+        }
+
+        AlertDialog dialog = builder.create();
+        dialog.setCancelable(false);
+
+        btnRestart.setOnClickListener(v -> {
+            dialog.dismiss();
+            recreate();
+        });
+
+        btnBack.setOnClickListener(v -> {
+            dialog.dismiss();
+            finish();
+        });
+
+        dialog.show();
     }
 
     private void saveRecord(long timestamp, int score) {
         SharedPreferences.Editor editor = sharedPreferences.edit();
-        // 移动现有记录，插入新记录到开头
         for (int i = 49; i > 0; i--) {
             int prevScore = sharedPreferences.getInt("record_score_" + (i - 1), 0);
             long prevTime = sharedPreferences.getLong("record_time_" + (i - 1), 0);
@@ -307,7 +319,6 @@ public class PlayActivity extends AppCompatActivity {
                 editor.putLong("record_time_" + i, prevTime);
             }
         }
-        // 插入新记录
         editor.putInt("record_score_0", score);
         editor.putLong("record_time_0", timestamp);
         editor.apply();
@@ -319,12 +330,9 @@ public class PlayActivity extends AppCompatActivity {
                 .setTitle("结束游戏")
                 .setMessage("您确定要退出吗？")
                 .setNeutralButton("否", null)
-                .setNegativeButton("是", new DialogInterface.OnClickListener() {
-                    @Override
-                    public void onClick(DialogInterface dialog, int which) {
-                        gameEngine.stopGame();
-                        finish();
-                    }
+                .setNegativeButton("是", (dialog, which) -> {
+                    gameEngine.stopGame();
+                    finish();
                 })
                 .show();
     }
@@ -335,18 +343,16 @@ public class PlayActivity extends AppCompatActivity {
         if (soundPool != null) {
             soundPool.release();
             soundPool = null;
+            Log.d(TAG, "SoundPool 释放成功");
         }
-        releaseMediaPlayer(mediaPlayerStart);
-        stopMusicService(); // 销毁时停止服务
+        if (exoplayer != null) {
+            exoplayer.stop();
+            exoplayer.release();
+            exoplayer = null;
+            Log.d(TAG, "ExoPlayer 释放成功");
+        }
+        stopMusicService();
         gameEngine.stopGame();
-    }
-
-    private void releaseMediaPlayer(MediaPlayer player) {
-        if (player != null) {
-            if (player.isPlaying()) player.stop();
-            player.release();
-            player = null;
-        }
     }
 
     private void startMusicService() {
@@ -357,5 +363,36 @@ public class PlayActivity extends AppCompatActivity {
     private void stopMusicService() {
         Intent intent = new Intent(this, MusicService.class);
         stopService(intent);
+    }
+
+    private void showScoreAnimation(ImageView target) {
+        TextView scoreText = new TextView(this);
+        scoreText.setText("+1");
+        scoreText.setTextColor(0xFFFF0000); // 红色文字
+        scoreText.setTextSize(20);
+        ConstraintLayout.LayoutParams params = new ConstraintLayout.LayoutParams(
+                ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT);
+        params.leftToLeft = ConstraintLayout.LayoutParams.PARENT_ID;
+        params.topToTop = ConstraintLayout.LayoutParams.PARENT_ID;
+        params.leftMargin = (int) target.getX() + target.getWidth() / 2;
+        params.topMargin = (int) target.getY() - 50;
+        ((ConstraintLayout) target.getParent()).addView(scoreText, params);
+
+        scoreText.animate()
+                .translationYBy(-50f)
+                .alpha(0f)
+                .setDuration(500)
+                .withEndAction(() -> ((ConstraintLayout) scoreText.getParent()).removeView(scoreText))
+                .start();
+    }
+
+    private void vibrate() {
+        if (vibrator != null && vibrator.hasVibrator()) {
+            if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+                vibrator.vibrate(VibrationEffect.createOneShot(VIBRATION_DURATION, VibrationEffect.DEFAULT_AMPLITUDE));
+            } else {
+                vibrator.vibrate(VIBRATION_DURATION);
+            }
+        }
     }
 }
