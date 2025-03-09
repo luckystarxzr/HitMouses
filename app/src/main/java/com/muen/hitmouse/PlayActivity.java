@@ -1,7 +1,6 @@
 package com.muen.hitmouse;
 
 import android.content.Context;
-import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
@@ -36,6 +35,8 @@ public class PlayActivity extends AppCompatActivity {
     private static final int MSG_GAME_OVER = 0x102;
     private static final String TAG = "PlayActivity";
     private static final long VIBRATION_DURATION = 50; // 震动持续时间（毫秒）
+    private static final long HIT_COOLDOWN = 100; // 每次击中之间的冷却时间（毫秒）
+    private static final int MAX_COMBO = 5; // 最大连击次数
 
     private Object binding;
     private SharedPreferences sharedPreferences;
@@ -47,6 +48,9 @@ public class PlayActivity extends AppCompatActivity {
     private boolean isRandomMode;
     private boolean isMuted = false;
     private Vibrator vibrator; // 震动服务
+    private long lastHitTime = 0; // 上次击中的时间
+    private int comboCount = 0; // 当前连击次数
+    private TextView comboText; // 用于显示连击次数的 TextView
 
     private final Handler handler = new Handler(Looper.getMainLooper()) {
         @Override
@@ -164,9 +168,7 @@ public class PlayActivity extends AppCompatActivity {
     }
 
     private void handleTouchEvent(MotionEvent event, ImageView hunter, ImageView mouse) {
-        Log.d(TAG, "Hunter class: " + hunter.getClass().getName() + ", Width: " + hunter.getWidth());
-        Log.d(TAG, "Mouse class: " + mouse.getClass().getName() + ", Width: " + mouse.getWidth());
-
+        long currentTime = System.currentTimeMillis();
         float x = Math.max(0, Math.min(event.getX() - hunter.getWidth() / 2f, ((View) hunter.getParent()).getWidth() - hunter.getWidth()));
         float y = Math.max(0, Math.min(event.getY() - hunter.getHeight() / 2f, ((View) hunter.getParent()).getHeight() - hunter.getHeight()));
 
@@ -175,14 +177,23 @@ public class PlayActivity extends AppCompatActivity {
             case MotionEvent.ACTION_MOVE:
                 hunter.setX(x);
                 hunter.setY(y);
-                if (!isPaused) {
+                if (!isPaused && currentTime - lastHitTime >= HIT_COOLDOWN && comboCount < MAX_COMBO) {
                     if (!isMuted) {
                         playKickSound();
                     }
-                    gameEngine.hitMouse();
-                    showScoreAnimation(mouse); // 使用现有的 showScoreAnimation
+                    gameEngine.hitMouse(); // 移除布尔检查，直接调用
+                    comboCount++; // 增加连击计数
+                    showScoreAnimation(mouse); // 显示得分动画
+                    showComboCounter(mouse); // 显示或更新连击计数器
                     vibrate(); // 震动反馈
+                    lastHitTime = currentTime; // 更新上次击中时间
+                    Log.d(TAG, "击中成功，连击次数: " + comboCount);
                 }
+                break;
+            case MotionEvent.ACTION_UP: // 手指抬起时重置连击计数并移除连击计数器
+                comboCount = 0;
+                removeComboCounter();
+                Log.d(TAG, "连击重置");
                 break;
         }
     }
@@ -326,15 +337,52 @@ public class PlayActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        new AlertDialog.Builder(this)
-                .setTitle("结束游戏")
-                .setMessage("您确定要退出吗？")
-                .setNeutralButton("否", null)
-                .setNegativeButton("是", (dialog, which) -> {
-                    gameEngine.stopGame();
-                    finish();
-                })
-                .show();
+        // 停止游戏以防止后台运行
+        gameEngine.stopGame();
+
+        // 创建自定义对话框
+        AlertDialog.Builder builder = new AlertDialog.Builder(this);
+        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_exit_game, null);
+        builder.setView(dialogView);
+
+        // 获取布局中的控件
+        CardView cardView = (CardView) dialogView;
+        TextView tvTitle = dialogView.findViewById(R.id.tv_title);
+        TextView tvMessage = dialogView.findViewById(R.id.tv_message);
+        Button btnCancel = dialogView.findViewById(R.id.btn_cancel);
+        Button btnConfirm = dialogView.findViewById(R.id.btn_confirm);
+
+        // 设置文本内容
+        tvTitle.setText("退出游戏");
+        tvMessage.setText("您确定要退出吗？");
+
+        // 设置卡片样式
+        cardView.setCardBackgroundColor(0xFFFFFFFF); // 白色背景
+        cardView.setRadius(16f); // 圆角半径
+        cardView.setCardElevation(8f); // 阴影提升
+
+        // 设置按钮点击事件
+        btnCancel.setOnClickListener(v -> {
+            // 点击“否”，关闭对话框并恢复游戏
+            gameEngine.startGame();
+            builder.create().dismiss();
+        });
+
+        btnConfirm.setOnClickListener(v -> {
+            // 点击“是”，结束活动
+            finish();
+        });
+
+        // 显示对话框并设置为不可取消（点击外部不关闭）
+        AlertDialog dialog = builder.create();
+        dialog.setCancelable(false);
+
+        // 调整对话框窗口属性以确保居中
+        WindowManager.LayoutParams params = dialog.getWindow().getAttributes();
+        params.gravity = android.view.Gravity.CENTER; // 强制居中
+        dialog.getWindow().setAttributes(params);
+
+        dialog.show();
     }
 
     @Override
@@ -353,6 +401,7 @@ public class PlayActivity extends AppCompatActivity {
         }
         stopMusicService();
         gameEngine.stopGame();
+        removeComboCounter(); // 确保清理连击计数器
     }
 
     private void startMusicService() {
@@ -367,13 +416,13 @@ public class PlayActivity extends AppCompatActivity {
 
     private void showScoreAnimation(ImageView target) {
         TextView scoreText = new TextView(this);
-        scoreText.setText("+1");
+        scoreText.setText(comboCount > 1 ? "+" + comboCount + " 连击!" : "+1");
         scoreText.setTextColor(0xFFFF0000); // 红色文字
         scoreText.setTextSize(20);
         ConstraintLayout.LayoutParams params = new ConstraintLayout.LayoutParams(
                 ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT);
         params.leftToLeft = ConstraintLayout.LayoutParams.PARENT_ID;
-        params.topToTop = ConstraintLayout.LayoutParams.PARENT_ID;
+        params.topToTop = ConstraintLayout.LayoutParams.PARENT_ID; // 修正为正确字段
         params.leftMargin = (int) target.getX() + target.getWidth() / 2;
         params.topMargin = (int) target.getY() - 50;
         ((ConstraintLayout) target.getParent()).addView(scoreText, params);
@@ -384,6 +433,34 @@ public class PlayActivity extends AppCompatActivity {
                 .setDuration(500)
                 .withEndAction(() -> ((ConstraintLayout) scoreText.getParent()).removeView(scoreText))
                 .start();
+    }
+
+    private void showComboCounter(ImageView target) {
+        ConstraintLayout parentLayout = (ConstraintLayout) target.getParent();
+
+        // 如果 comboText 还未创建，则初始化
+        if (comboText == null) {
+            comboText = new TextView(this);
+            comboText.setTextColor(0xFFFFFF00); // 黄色文字，区分于得分动画
+            comboText.setTextSize(18);
+            ConstraintLayout.LayoutParams params = new ConstraintLayout.LayoutParams(
+                    ConstraintLayout.LayoutParams.WRAP_CONTENT, ConstraintLayout.LayoutParams.WRAP_CONTENT);
+            params.leftToLeft = ConstraintLayout.LayoutParams.PARENT_ID;
+            params.topToTop = ConstraintLayout.LayoutParams.PARENT_ID; // 修正为正确字段
+            params.leftMargin = (int) target.getX() + target.getWidth() + 10; // 地鼠右侧10像素
+            params.topMargin = (int) target.getY() + target.getHeight() / 2; // 地鼠中间高度
+            parentLayout.addView(comboText, params);
+        }
+
+        // 更新连击计数器文本
+        comboText.setText("连击 x" + comboCount);
+    }
+
+    private void removeComboCounter() {
+        if (comboText != null && comboText.getParent() != null) {
+            ((ConstraintLayout) comboText.getParent()).removeView(comboText);
+            comboText = null; // 重置为 null，以便下次重新创建
+        }
     }
 
     private void vibrate() {
