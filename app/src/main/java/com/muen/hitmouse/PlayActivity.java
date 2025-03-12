@@ -38,10 +38,11 @@ public class PlayActivity extends AppCompatActivity {
     private static final int MSG_GAME_OVER = 0x102;
     private static final String TAG = "PlayActivity";
     private static final long VIBRATION_DURATION = 50;
-    private static final long HIT_COOLDOWN = 100;
-    private static final int MAX_COMBO = 5;
+    private static final long HIT_COOLDOWN = 100; // 击中冷却时间，防止过快连击
+    private static final int MAX_COMBO = 5; // 最大连击次数限制
 
-    private Object binding;
+    private LayoutPlayEasyBinding easyBinding;
+    private LayoutPlayHardBinding hardBinding;
     private SharedPreferences sharedPreferences;
     private ExoPlayer exoplayer;
     private SoundPool soundPool;
@@ -51,25 +52,27 @@ public class PlayActivity extends AppCompatActivity {
     private boolean isRandomMode;
     private boolean isMuted = false;
     private Vibrator vibrator;
-    private long lastHitTime = 0;
-    private int comboCount = 0;
+    private long lastHitTime = 0; // 上次击中时间，用于冷却判断
+    private int comboCount = 0; // 当前连击次数
     private TextView comboText;
     private List<ImageView> mouseViews;
 
+    // Handler 用于处理 UI 更新和游戏结束消息
     private final Handler handler = new Handler(Looper.getMainLooper()) {
         @Override
         public void handleMessage(Message msg) {
             switch (msg.what) {
                 case MSG_UPDATE_UI:
                     if (!isPaused) {
-                        gameEngine.updateUI(msg.arg1);
-                        if (!isMuted && exoplayer != null && exoplayer.isPlaying()) {
-                            exoplayer.play();
+                        gameEngine.updateUI(msg.arg1); // 更新地鼠位置等 UI
+                        if (!isMuted && exoplayer != null && !exoplayer.isPlaying()) {
+                            exoplayer.play(); // 确保背景音乐在未静音时播放
                         }
                     }
                     break;
                 case MSG_GAME_OVER:
-                    gameOver();
+                    Log.d(TAG, "Received MSG_GAME_OVER, showing game over dialog");
+                    gameOver(); // 处理游戏结束逻辑
                     break;
             }
         }
@@ -82,58 +85,61 @@ public class PlayActivity extends AppCompatActivity {
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
 
         sharedPreferences = getSharedPreferences("user", MODE_PRIVATE);
-        isRandomMode = getIntent().getBooleanExtra("isRandomMode", false);
-        isMuted = sharedPreferences.getBoolean("isMuted", false);
+        isRandomMode = getIntent().getBooleanExtra("isRandomMode", false); // 从 Intent 获取模式
+        isMuted = sharedPreferences.getBoolean("isMuted", false); // 从 SharedPreferences 获取静音设置
 
+        // 根据模式加载不同的布局
         if (!isRandomMode) {
-            binding = LayoutPlayEasyBinding.inflate(getLayoutInflater());
-            setContentView(((LayoutPlayEasyBinding) binding).getRoot());
+            easyBinding = LayoutPlayEasyBinding.inflate(getLayoutInflater());
+            setContentView(easyBinding.getRoot());
         } else {
-            binding = LayoutPlayHardBinding.inflate(getLayoutInflater());
-            setContentView(((LayoutPlayHardBinding) binding).getRoot());
+            hardBinding = LayoutPlayHardBinding.inflate(getLayoutInflater());
+            setContentView(hardBinding.getRoot());
         }
 
-        initAudioPlayers();
-        setupTouchListenersWithObserver();
-        setupButtons();
+        initAudioPlayers(); // 初始化音频播放器
+        setupTouchListenersWithObserver(); // 设置触摸监听器
+        setupButtons(); // 设置按钮监听器
 
+        // 初始化地鼠洞数组，仅在简单模式下使用
         View[] holes;
         if (!isRandomMode) {
-            LayoutPlayEasyBinding easyBinding = (LayoutPlayEasyBinding) binding;
             holes = new View[] {
                     easyBinding.hole1, easyBinding.hole2, easyBinding.hole3,
                     easyBinding.hole4, easyBinding.hole5, easyBinding.hole6,
                     easyBinding.hole7, easyBinding.hole8, easyBinding.hole9
             };
         } else {
-            holes = new View[0];
+            holes = new View[0]; // 困难模式下无固定洞
         }
 
         mouseViews = new ArrayList<>();
-        ImageView initialMouse = !isRandomMode ? ((LayoutPlayEasyBinding) binding).mouse : ((LayoutPlayHardBinding) binding).mouse;
-        mouseViews.add(initialMouse);
+        ImageView initialMouse = !isRandomMode ? easyBinding.mouse : hardBinding.mouse;
+        mouseViews.add(initialMouse); // 添加初始地鼠视图
 
+        // 初始化 GameEngine，传入必要的视图和参数
         gameEngine = new GameEngine(
                 this,
                 handler,
                 holes,
                 mouseViews,
-                !isRandomMode ? ((LayoutPlayEasyBinding) binding).boom : ((LayoutPlayHardBinding) binding).boom,
-                !isRandomMode ? ((LayoutPlayEasyBinding) binding).hunter : ((LayoutPlayHardBinding) binding).hunter,
-                !isRandomMode ? ((LayoutPlayEasyBinding) binding).time : ((LayoutPlayHardBinding) binding).time,
-                !isRandomMode ? ((LayoutPlayEasyBinding) binding).scoreText : ((LayoutPlayHardBinding) binding).scoreText,
+                !isRandomMode ? easyBinding.boom : hardBinding.boom,
+                !isRandomMode ? easyBinding.hunter : hardBinding.hunter,
+                !isRandomMode ? easyBinding.time : hardBinding.time,
+                !isRandomMode ? easyBinding.scoreText : hardBinding.scoreText,
                 isRandomMode
         );
 
         vibrator = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
 
         Toast.makeText(this, isRandomMode ? "困难模式开始！" : "简单模式开始！", Toast.LENGTH_SHORT).show();
-        gameEngine.startGame();
+        gameEngine.startGame(); // 启动游戏
     }
 
+    // 初始化音频播放器，包括 SoundPool 和 ExoPlayer
     private void initAudioPlayers() {
         soundPool = new SoundPool.Builder().setMaxStreams(2).build();
-        kickSoundId = soundPool.load(this, R.raw.kick, 1);
+        kickSoundId = soundPool.load(this, R.raw.kick, 1); // 加载击中音效
 
         exoplayer = new ExoPlayer.Builder(this).build();
         MediaItem mediaItem = MediaItem.fromUri("android.resource://" + getPackageName() + "/" + R.raw.start);
@@ -153,27 +159,27 @@ public class PlayActivity extends AppCompatActivity {
 
     private void setupTouchListenersWithObserver() {
         if (!isRandomMode) {
-            LayoutPlayEasyBinding easyBinding = (LayoutPlayEasyBinding) binding;
             setupTouchListener(easyBinding.easyLayout, easyBinding.hunter);
         } else {
-            LayoutPlayHardBinding hardBinding = (LayoutPlayHardBinding) binding;
             setupTouchListener(hardBinding.hardLayout, hardBinding.hunter);
         }
     }
 
+    // 设置触摸监听器，确保布局加载完成后再绑定
     private void setupTouchListener(View layout, ImageView hunter) {
         layout.getViewTreeObserver().addOnGlobalLayoutListener(new ViewTreeObserver.OnGlobalLayoutListener() {
             @Override
             public void onGlobalLayout() {
                 layout.getViewTreeObserver().removeOnGlobalLayoutListener(this);
                 layout.setOnTouchListener((v, event) -> {
-                    handleTouchEvent(event, hunter);
+                    handleTouchEvent(event, hunter); // 处理触摸事件
                     return true;
                 });
             }
         });
     }
 
+    // 处理触摸事件，控制猎人移动和击中地鼠
     private void handleTouchEvent(MotionEvent event, ImageView hunter) {
         long currentTime = System.currentTimeMillis();
         float x = Math.max(0, Math.min(event.getX() - hunter.getWidth() / 2f, ((View) hunter.getParent()).getWidth() - hunter.getWidth()));
@@ -182,25 +188,26 @@ public class PlayActivity extends AppCompatActivity {
         switch (event.getAction()) {
             case MotionEvent.ACTION_DOWN:
             case MotionEvent.ACTION_MOVE:
-                hunter.setX(x);
+                hunter.setX(x); // 更新猎人位置
                 hunter.setY(y);
+                // 检查是否可以击中（未暂停、冷却时间已过、连击未达上限）
                 if (!isPaused && currentTime - lastHitTime >= HIT_COOLDOWN && comboCount < MAX_COMBO) {
                     ImageView hitMouse = gameEngine.hitMouse(hunter);
                     if (hitMouse != null) {
                         if (!isMuted) {
-                            playKickSound();
+                            playKickSound(); // 播放击中音效
                         }
                         comboCount++;
-                        showScoreAnimation(hitMouse);
-                        showComboCounter(hitMouse);
-                        vibrate();
+                        showScoreAnimation(hitMouse); // 显示得分动画
+                        showComboCounter(hitMouse); // 显示连击计数
+                        vibrate(); // 震动反馈
                         lastHitTime = currentTime;
                         Log.d(TAG, "击中成功，连击次数: " + comboCount);
                     }
                 }
                 break;
             case MotionEvent.ACTION_UP:
-                comboCount = 0;
+                comboCount = 0; // 重置连击
                 removeComboCounter();
                 Log.d(TAG, "连击重置");
                 break;
@@ -215,10 +222,8 @@ public class PlayActivity extends AppCompatActivity {
 
     private void setupButtons() {
         if (!isRandomMode) {
-            LayoutPlayEasyBinding easyBinding = (LayoutPlayEasyBinding) binding;
             setupButtonListeners(easyBinding.btnPause, easyBinding.btnBack, easyBinding.btnMute);
         } else {
-            LayoutPlayHardBinding hardBinding = (LayoutPlayHardBinding) binding;
             setupButtonListeners(hardBinding.btnPause, hardBinding.btnBack, hardBinding.btnMute);
         }
     }
@@ -233,21 +238,18 @@ public class PlayActivity extends AppCompatActivity {
     private void togglePause() {
         if (!isPaused) {
             gameEngine.stopGame();
-            handler.removeCallbacksAndMessages(null);
+            handler.removeCallbacksAndMessages(null); // 移除所有回调，避免残余任务
             getPauseButton().setText("继续");
         } else {
             gameEngine.resumeGame();
             getPauseButton().setText("暂停");
         }
         isPaused = !isPaused;
+        Log.d(TAG, "Game paused: " + isPaused);
     }
 
     private Button getPauseButton() {
-        if (!isRandomMode) {
-            return ((LayoutPlayEasyBinding) binding).btnPause;
-        } else {
-            return ((LayoutPlayHardBinding) binding).btnPause;
-        }
+        return !isRandomMode ? easyBinding.btnPause : hardBinding.btnPause;
     }
 
     private void toggleMusic() {
@@ -272,22 +274,28 @@ public class PlayActivity extends AppCompatActivity {
     }
 
     private Button getMuteButton() {
-        if (!isRandomMode) {
-            return ((LayoutPlayEasyBinding) binding).btnMute;
-        } else {
-            return ((LayoutPlayHardBinding) binding).btnMute;
-        }
+        return !isRandomMode ? easyBinding.btnMute : hardBinding.btnMute;
     }
 
+    // 处理游戏结束逻辑，显示得分对话框
     private void gameOver() {
-        gameEngine.endGame();
+        gameEngine.endGame(); // 结束游戏引擎
         int count = gameEngine.getCount();
         long timestamp = System.currentTimeMillis();
 
-        saveRecord(timestamp, count);
+        Log.d(TAG, "Game over, score: " + count + ", time: " + timestamp);
+
+        saveRecord(timestamp, count); // 保存游戏记录
 
         AlertDialog.Builder builder = new AlertDialog.Builder(this);
-        View dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_game_over, null);
+        View dialogView;
+        try {
+            dialogView = LayoutInflater.from(this).inflate(R.layout.dialog_game_over, null);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to inflate game over dialog: " + e.getMessage());
+            finish(); // 如果对话框加载失败，直接结束活动
+            return;
+        }
         builder.setView(dialogView);
 
         CardView cardView = (CardView) dialogView;
@@ -296,8 +304,15 @@ public class PlayActivity extends AppCompatActivity {
         Button btnRestart = dialogView.findViewById(R.id.btn_restart);
         Button btnBack = dialogView.findViewById(R.id.btn_back);
 
+        // 检查对话框视图是否正确加载
+        if (tvTitle == null || tvMessage == null || btnRestart == null || btnBack == null) {
+            Log.e(TAG, "Game over dialog views not found");
+            finish();
+            return;
+        }
+
         int highScore = sharedPreferences.getInt("high_score", 0);
-        String rating = count >= 30 ? "地鼠大师" : count >= 15 ? "地鼠猎手" : "地鼠新手";
+        String rating = count >= 166 ? "地鼠大师" : count >= 99 ? "地鼠猎手" : "地鼠新手";
         if (count > highScore) {
             sharedPreferences.edit().putInt("high_score", count).apply();
             tvTitle.setText("新纪录！");
@@ -321,16 +336,24 @@ public class PlayActivity extends AppCompatActivity {
         dialog.setCancelable(false);
 
         btnRestart.setOnClickListener(v -> {
+            Log.d(TAG, "Restart clicked");
             dialog.dismiss();
-            recreate();
+            recreate(); // 重启活动
         });
 
         btnBack.setOnClickListener(v -> {
+            Log.d(TAG, "Back clicked");
             dialog.dismiss();
-            finish();
+            finish(); // 返回主页面
         });
 
-        dialog.show();
+        try {
+            dialog.show();
+            Log.d(TAG, "Game over dialog shown");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to show game over dialog: " + e.getMessage());
+            finish();
+        }
     }
 
     private void saveRecord(long timestamp, int score) {
@@ -393,6 +416,7 @@ public class PlayActivity extends AppCompatActivity {
         dialog.show();
     }
 
+    // 释放资源，防止内存泄漏
     @Override
     protected void onDestroy() {
         super.onDestroy();
@@ -407,9 +431,13 @@ public class PlayActivity extends AppCompatActivity {
             exoplayer = null;
             Log.d(TAG, "ExoPlayer 释放成功");
         }
+        if (handler != null) {
+            handler.removeCallbacksAndMessages(null); // 清理 Handler 任务
+        }
         stopMusicService();
         gameEngine.endGame();
         removeComboCounter();
+        Log.d(TAG, "Activity destroyed");
     }
 
     private void startMusicService() {
@@ -439,7 +467,11 @@ public class PlayActivity extends AppCompatActivity {
                 .translationYBy(-50f)
                 .alpha(0f)
                 .setDuration(500)
-                .withEndAction(() -> ((ConstraintLayout) scoreText.getParent()).removeView(scoreText))
+                .withEndAction(() -> {
+                    if (scoreText.getParent() != null) {
+                        ((ConstraintLayout) scoreText.getParent()).removeView(scoreText);
+                    }
+                })
                 .start();
     }
 
@@ -479,15 +511,22 @@ public class PlayActivity extends AppCompatActivity {
         }
     }
 
+    // 添加新的地鼠视图，同步保护避免多线程问题
     public void addMouseView() {
-        ConstraintLayout layout = (ConstraintLayout) mouseViews.get(0).getParent();
-        ImageView newMouse = new ImageView(this);
-        newMouse.setImageResource(R.drawable.mouse);
-        newMouse.setLayoutParams(new ConstraintLayout.LayoutParams(
-                mouseViews.get(0).getWidth(), mouseViews.get(0).getHeight()));
-        newMouse.setVisibility(View.INVISIBLE);
-        layout.addView(newMouse);
-        mouseViews.add(newMouse);
-        Log.d(TAG, "Added new mouse view, Total mice: " + mouseViews.size());
+        synchronized (mouseViews) {
+            if (mouseViews.size() < GameEngine.MAX_MOUSE_COUNT) {
+                ConstraintLayout layout = (ConstraintLayout) mouseViews.get(0).getParent();
+                ImageView newMouse = new ImageView(this);
+                newMouse.setImageResource(R.drawable.mouse);
+                newMouse.setLayoutParams(new ConstraintLayout.LayoutParams(
+                        mouseViews.get(0).getWidth(), mouseViews.get(0).getHeight()));
+                newMouse.setVisibility(View.INVISIBLE);
+                layout.addView(newMouse);
+                mouseViews.add(newMouse);
+                Log.d(TAG, "Added new mouse view, Total mice: " + mouseViews.size());
+            } else {
+                Log.d(TAG, "Max mouse count reached: " + GameEngine.MAX_MOUSE_COUNT);
+            }
+        }
     }
 }
